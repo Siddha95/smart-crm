@@ -1,3 +1,4 @@
+import datetime
 import math
 import os
 
@@ -22,6 +23,8 @@ def clean_row(row: dict) -> dict:
             result[k] = None if np.isnan(v) else float(v)
         elif isinstance(v, np.bool_):
             result[k] = bool(v)
+        elif isinstance(v, (datetime.datetime, datetime.date)):
+            result[k] = v.isoformat()
         else:
             result[k] = v
     return result
@@ -66,6 +69,8 @@ def _sync_data_source(name: str, label: str, columns: list, source_file: str, ow
 def _import_sheet(filepath: str, sheet_name: str, source_file: str, embedding_provider, owner) -> dict:
     """Importa un singolo foglio come DataSource."""
     df = load_sheet(filepath, sheet_name)
+    # Normalizza i nomi colonna a stringa (pandas può restituire int se l'header è numerico)
+    df.columns = [str(c).strip() for c in df.columns]
     columns = list(df.columns)
 
     # Nome interno univoco: {source_file}_{sheet_name}
@@ -96,6 +101,7 @@ def preview_sheets(filepath: str, max_rows: int = 5) -> list[dict]:
     result = []
     for sheet_name in sheet_names:
         df = load_sheet(filepath, sheet_name)
+        df.columns = [str(c).strip() for c in df.columns]
         columns = list(df.columns)
         rows = [clean_row(row.to_dict()) for _, row in df.head(max_rows).iterrows()]
         result.append({'name': sheet_name, 'columns': columns, 'rows': rows})

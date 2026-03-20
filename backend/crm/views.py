@@ -188,10 +188,15 @@ class DataSourceViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'I campi "file" e "name" sono obbligatori.'}, status=status.HTTP_400_BAD_REQUEST)
         tmp_path = _save_temp_file(file)
         try:
+            from django.core.exceptions import ValidationError as DjangoValidationError
             embedding_provider = get_embedding_provider()
             result = import_all_sheets(tmp_path, source_file=name, embedding_provider=embedding_provider, owner=request.user)
         except (FileNotFoundError, ValueError) as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except DjangoValidationError as e:
+            return Response({'detail': e.message_dict if hasattr(e, 'message_dict') else str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'detail': f'Errore imprevisto: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
             os.unlink(tmp_path)
         return Response(result, status=status.HTTP_200_OK)
