@@ -13,11 +13,13 @@ class UserProfile(models.Model):
     return self.user.username
   
 class DataSource(models.Model):
-  '''Rappresenta un Excel: Clienti, partner, etc...'''
+  '''Rappresenta un foglio di un file Excel: Clienti, partner, etc...'''
   owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='datasources')
   name = models.CharField(max_length=255)
   label = models.CharField(max_length=255)
   columns = models.JSONField()
+  source_file = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+  stages = models.JSONField(default=list, blank=True)
   created_at = models.DateTimeField(auto_now_add=True)
 
   def save(self, *args, **kwargs):
@@ -27,6 +29,8 @@ class DataSource(models.Model):
   def clean(self):
     if not isinstance(self.columns, list) or not all(isinstance(c, str) for c in self.columns):
       raise ValidationError({'columns': 'Deve essere una lista di stringhe.'})
+    if not isinstance(self.stages, list) or not all(isinstance(s, str) for s in self.stages):
+      raise ValidationError({'stages': 'Deve essere una lista di stringhe.'})
 
   def __str__(self):
     return self.name
@@ -37,6 +41,8 @@ class Record(models.Model):
   data = models.JSONField()
   embedding = VectorField(dimensions=1536, null=True, blank=True)
   is_active = models.BooleanField(default=True)
+  is_favorite = models.BooleanField(default=False, db_index=True)
+  stage = models.CharField(max_length=100, blank=True, default='', db_index=True)
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
 
@@ -55,6 +61,17 @@ class RecordHistory(models.Model):
   def __str__(self):
     return f"History for Record {self.record.id} at {self.changed_at}"
   
+class RecordComment(models.Model):
+  '''Commento interno su un Record'''
+  record = models.ForeignKey(Record, on_delete=models.CASCADE, related_name='comments')
+  user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='record_comments')
+  text = models.CharField(max_length=2000)
+  created_at = models.DateTimeField(auto_now_add=True)
+
+  def __str__(self):
+    return f"Comment by {self.user} on Record {self.record_id}"
+
+
 class Attachment(models.Model):
   '''Rappresenta un file allegato a un Record'''
 
@@ -82,4 +99,19 @@ class Attachment(models.Model):
 
   def __str__(self):
     return f"{self.get_file_type_display()} – Record {self.record.id}"
+
+
+class Note(models.Model):
+  '''Nota personale dell\'utente (taccuino)'''
+  owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notes')
+  title = models.CharField(max_length=255, default='Senza titolo')
+  content = models.TextField(blank=True, default='')
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  class Meta:
+    ordering = ['-updated_at']
+
+  def __str__(self):
+    return self.title
 

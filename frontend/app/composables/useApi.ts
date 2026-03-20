@@ -2,7 +2,26 @@ export const useApi = () => {
   const config = useRuntimeConfig()
   const authStore = useAuthStore()
 
-  const request = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
+  // Rinnova l'access token usando il refresh token
+  async function refreshAccessToken(): Promise<boolean> {
+    if (!authStore.refreshToken) return false
+    try {
+      const res = await fetch(`${config.public.apiBase}/auth/token/refresh/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh: authStore.refreshToken }),
+      })
+      if (!res.ok) return false
+      const data = await res.json()
+      authStore.token = data.access
+      if (data.refresh) authStore.refreshToken = data.refresh
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const request = async <T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> => {
     const url = `${config.public.apiBase}${path}`
 
     const headers: Record<string, string> = {
@@ -16,7 +35,15 @@ export const useApi = () => {
 
     const response = await fetch(url, { ...options, headers })
 
-    // Token scaduto — logout automatico
+    // Token scaduto — prova il refresh automatico (una sola volta)
+    if (response.status === 401 && !isRetry) {
+      const refreshed = await refreshAccessToken()
+      if (refreshed) return request<T>(path, options, true)
+      authStore.logout()
+      navigateTo('/login')
+      throw new Error('Sessione scaduta.')
+    }
+
     if (response.status === 401) {
       authStore.logout()
       navigateTo('/login')
@@ -27,6 +54,9 @@ export const useApi = () => {
       const error = await response.json().catch(() => ({ detail: 'Errore sconosciuto.' }))
       throw new Error(error.detail || 'Errore nella richiesta.')
     }
+
+    // 204 No Content (es. DELETE) — nessun body da parsare
+    if (response.status === 204) return undefined as T
 
     return response.json()
   }
@@ -41,14 +71,34 @@ export const useApi = () => {
 
   const del = (path: string) => request(path, { method: 'DELETE' })
 
-  const upload = <T>(path: string, formData: FormData) => {
+  const download = async (path: string, filename: string) => {
     const url = `${config.public.apiBase}${path}`
-    return fetch(url, {
+    const res = await fetch(url, {
+      headers: authStore.token ? { Authorization: `Bearer ${authStore.token}` } : {},
+    })
+    if (!res.ok) throw new Error('Download fallito.')
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  const upload = async <T>(path: string, formData: FormData): Promise<T> => {
+    const url = `${config.public.apiBase}${path}`
+    const res = await fetch(url, {
       method: 'POST',
       headers: authStore.token ? { Authorization: `Bearer ${authStore.token}` } : {},
       body: formData,
-    }).then(r => r.json() as Promise<T>)
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Errore nel caricamento.' }))
+      throw new Error(error.detail || 'Errore nel caricamento.')
+    }
+    if (res.status === 204) return undefined as T
+    return res.json()
   }
 
-  return { get, post, patch, del, upload }
+  return { get, post, patch, del, upload, download }
 }

@@ -50,6 +50,20 @@ async function remove(id: number) {
   await fetch()
 }
 
+async function downloadFile(att: Attachment) {
+  try {
+    const res = await window.fetch(att.file_url)
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = att.filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  } catch {
+    toast.add({ title: 'Download fallito.', color: 'error' })
+  }
+}
+
 const iconMap: Record<string, string> = {
   photo: 'lucide:image',
   pdf: 'lucide:file-text',
@@ -88,7 +102,7 @@ const iconMap: Record<string, string> = {
       </div>
       <div class="flex gap-1">
         <UButton size="xs" variant="ghost" icon="lucide:eye" :to="att.file_url" target="_blank" />
-        <UButton size="xs" variant="ghost" icon="lucide:download" :to="att.file_url" download />
+        <UButton size="xs" variant="ghost" icon="lucide:download" @click="downloadFile(att)" />
         <UButton size="xs" variant="ghost" icon="lucide:trash-2" color="error" @click="remove(att.id)" />
       </div>
     </div>

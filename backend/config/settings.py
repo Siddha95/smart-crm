@@ -88,6 +88,15 @@ OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # in produzione impostare CORS_ALLOWED_ORIGINS
 
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),    # dura una giornata lavorativa
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),   # rinnovo per un mese
+    'ROTATE_REFRESH_TOKENS': True,                  # ogni refresh emette un nuovo refresh token
+    'BLACKLIST_AFTER_ROTATION': False,
+}
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',

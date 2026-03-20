@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_ai_provider
+from dependencies import get_user_ai_provider, get_user_id
 from models import DataSource, Record
 from services.ai.base import AIProvider
 from services.ai import prompts
@@ -11,7 +11,10 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 @router.get("/datasources")
-def list_datasources(owner_id: int, db: Session = Depends(get_db)):
+def list_datasources(
+    db: Session = Depends(get_db),
+    owner_id: int = Depends(get_user_id),
+):
     sources = db.query(DataSource).filter(DataSource.owner_id == owner_id).all()
     return [
         {"id": s.id, "name": s.name, "label": s.label, "columns": s.columns}
@@ -22,9 +25,9 @@ def list_datasources(owner_id: int, db: Session = Depends(get_db)):
 @router.get("/datasources/{datasource_id}/records")
 def list_records(
     datasource_id: int,
-    owner_id: int,
     active_only: bool = True,
     db: Session = Depends(get_db),
+    owner_id: int = Depends(get_user_id),
 ):
     source = db.query(DataSource).filter(
         DataSource.id == datasource_id, DataSource.owner_id == owner_id
@@ -41,10 +44,10 @@ def list_records(
 @router.post("/datasources/{datasource_id}/report")
 def generate_report(
     datasource_id: int,
-    owner_id: int,
     context: str = "",
     db: Session = Depends(get_db),
-    provider: AIProvider = Depends(get_ai_provider),
+    provider: AIProvider = Depends(get_user_ai_provider),
+    owner_id: int = Depends(get_user_id),
 ):
     source = db.query(DataSource).filter(
         DataSource.id == datasource_id, DataSource.owner_id == owner_id

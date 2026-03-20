@@ -9,6 +9,7 @@ useSeoMeta({ title: 'Smart CRM' })
 
 const authStore = useAuthStore()
 const chatStore = useChatStore()
+const notesStore = useNotesStore()
 const router = useRouter()
 
 function logout() {
@@ -21,15 +22,21 @@ function logout() {
   <UApp>
     <UHeader v-if="authStore.isAuthenticated">
       <template #left>
-        <NuxtLink to="/dashboard" class="font-semibold text-lg">Smart CRM</NuxtLink>
+        <NuxtLink to="/dashboard">
+          <AppLogo />
+        </NuxtLink>
       </template>
 
       <template #right>
         <UButton icon="lucide:upload" variant="ghost" to="/import">Importa</UButton>
+        <UButton icon="lucide:notebook-pen" variant="ghost" @click="notesStore.open = true">
+          Note
+        </UButton>
         <UButton icon="lucide:bot" variant="ghost" @click="chatStore.open = true">
           AI
         </UButton>
         <UColorModeButton />
+        <UButton icon="lucide:settings" variant="ghost" color="neutral" to="/settings" />
         <UButton icon="lucide:log-out" variant="ghost" color="neutral" @click="logout" />
       </template>
     </UHeader>
@@ -40,5 +47,8 @@ function logout() {
 
     <!-- Chat AI sempre accessibile -->
     <AiChatSidebar />
+
+    <!-- Taccuino note -->
+    <TacquinoSlideover />
   </UApp>
 </template>

@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     claude_api_key: str = ""
     openai_api_key: str = ""
+    django_secret_key: str = ""
 
     db_name: str = "smart_crm"
     db_user: str = ""
