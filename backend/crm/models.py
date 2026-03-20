@@ -43,6 +43,7 @@ class Record(models.Model):
   is_active = models.BooleanField(default=True)
   is_favorite = models.BooleanField(default=False, db_index=True)
   stage = models.CharField(max_length=100, blank=True, default='', db_index=True)
+  position = models.IntegerField(default=0, db_index=True)
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
 
@@ -99,6 +100,24 @@ class Attachment(models.Model):
 
   def __str__(self):
     return f"{self.get_file_type_display()} – Record {self.record.id}"
+
+
+class StageTemplate(models.Model):
+  '''Modello di stage riutilizzabile'''
+  owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='stage_templates')
+  name = models.CharField(max_length=255)
+  stages = models.JSONField()
+
+  class Meta:
+    ordering = ['name']
+    unique_together = [('owner', 'name')]
+
+  def clean(self):
+    if not isinstance(self.stages, list) or not all(isinstance(s, str) for s in self.stages):
+      raise ValidationError({'stages': 'Deve essere una lista di stringhe.'})
+
+  def __str__(self):
+    return self.name
 
 
 class Note(models.Model):

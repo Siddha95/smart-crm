@@ -10,7 +10,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from crm.models import Attachment, DataSource, Note, Record, RecordComment, RecordHistory, UserProfile
+from crm.models import Attachment, DataSource, Note, Record, RecordComment, RecordHistory, StageTemplate, UserProfile
 from crm.serializers import (
     AttachmentSerializer,
     DataSourceSerializer,
@@ -18,6 +18,7 @@ from crm.serializers import (
     RecordCommentSerializer,
     RecordHistorySerializer,
     RecordSerializer,
+    StageTemplateSerializer,
     UserProfileSerializer,
 )
 from crm.services.excel_export import export_datasource, export_group
@@ -312,7 +313,11 @@ class RecordViewSet(viewsets.ModelViewSet):
 
         # Ordering
         ordering = self.request.query_params.get('ordering', '')
-        if ordering:
+        if ordering == 'position':
+            queryset = queryset.order_by('position', 'id')
+        elif ordering == '-position':
+            queryset = queryset.order_by('-position', 'id')
+        elif ordering:
             desc = ordering.startswith('-')
             col = ordering.lstrip('-')
             if _SAFE_COL_RE.match(col):
@@ -379,6 +384,22 @@ class RecordViewSet(viewsets.ModelViewSet):
         deleted, _ = Record.objects.filter(id__in=ids, data_source__owner=request.user).delete()
         return Response({'deleted': deleted})
 
+    @action(detail=False, methods=['post'], url_path='reorder')
+    def reorder(self, request):
+        """Salva l'ordine dei record nel kanban. ids = lista ordinata di id."""
+        ids = request.data.get('ids', [])
+        if not ids:
+            return Response({'detail': 'ids è obbligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
+        records = Record.objects.filter(id__in=ids, data_source__owner=request.user)
+        id_map = {r.id: r for r in records}
+        to_update = []
+        for position, record_id in enumerate(ids):
+            if record_id in id_map:
+                id_map[record_id].position = position
+                to_update.append(id_map[record_id])
+        Record.objects.bulk_update(to_update, ['position'])
+        return Response({'updated': len(to_update)})
+
     @action(detail=False, methods=['post'], url_path='bulk_move')
     def bulk_move(self, request):
         """Sposta più record in un altro DataSource."""
@@ -436,6 +457,16 @@ class NoteViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Note.objects.filter(owner=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
+
+
+class StageTemplateViewSet(viewsets.ModelViewSet):
+    serializer_class = StageTemplateSerializer
+
+    def get_queryset(self):
+        return StageTemplate.objects.filter(owner=self.request.user)
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)

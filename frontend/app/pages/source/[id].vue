@@ -218,6 +218,7 @@ async function loadKanbanRecords() {
     const params = new URLSearchParams()
     params.set('data_source', String(datasourceId.value))
     params.set('page_size', '500')
+    params.set('ordering', 'position')
     const data = await api.get<{ count: number; results: any[] }>(`/records/?${params}`)
     kanbanRecords.value = data.results
   } catch (e: any) {
@@ -227,12 +228,17 @@ async function loadKanbanRecords() {
   }
 }
 
-async function onStageChanged(recordId: number, newStage: string) {
-  // Ottimistic update
+async function onDropped(recordId: number, newStage: string, orderedIds: number[]) {
+  // Ottimistic update stage sul record locale
   const r = kanbanRecords.value.find(r => r.id === recordId)
+  const stageChanged = r && r.stage !== newStage
   if (r) r.stage = newStage
+
   try {
-    await api.patch(`/records/${recordId}/`, { stage: newStage })
+    // Salva stage se cambiato
+    if (stageChanged) await api.patch(`/records/${recordId}/`, { stage: newStage })
+    // Salva sempre l'ordine
+    await api.post('/records/reorder/', { ids: orderedIds })
   } catch (e: any) {
     toast.add({ title: e.message, color: 'error' })
     await loadKanbanRecords()
@@ -249,10 +255,55 @@ const stagesEdit = ref<string[]>([])
 const newStageName = ref('')
 const savingStages = ref(false)
 
+// ── Modelli stage ────────────────────────────────────────────────────────────
+interface StageTemplate { id: number; name: string; stages: string[] }
+const stageTemplates = ref<StageTemplate[]>([])
+const saveTemplateOpen = ref(false)
+const newTemplateName = ref('')
+
+async function loadStageTemplates() {
+  try {
+    stageTemplates.value = await api.get<StageTemplate[]>('/stage-templates/')
+  } catch (e: any) {
+    toast.add({ title: `Errore caricamento modelli: ${e.message}`, color: 'error' })
+  }
+}
+
+async function saveAsTemplate() {
+  const name = newTemplateName.value.trim()
+  if (!name || !stagesEdit.value.length) return
+  try {
+    const t = await api.post<StageTemplate>('/stage-templates/', { name, stages: stagesEdit.value })
+    stageTemplates.value.push(t)
+    stageTemplates.value.sort((a, b) => a.name.localeCompare(b.name))
+    newTemplateName.value = ''
+    saveTemplateOpen.value = false
+    toast.add({ title: `Modello "${name}" salvato.`, color: 'success' })
+  } catch (e: any) {
+    toast.add({ title: e.message, color: 'error' })
+  }
+}
+
+async function deleteTemplate(id: number) {
+  try {
+    await api.del(`/stage-templates/${id}/`)
+    stageTemplates.value = stageTemplates.value.filter(t => t.id !== id)
+  } catch (e: any) {
+    toast.add({ title: e.message, color: 'error' })
+  }
+}
+
+function loadTemplate(t: StageTemplate) {
+  stagesEdit.value = [...t.stages]
+}
+
 function openStageConfig() {
   stagesEdit.value = [...(datasource.value?.stages ?? [])]
   newStageName.value = ''
+  saveTemplateOpen.value = false
+  newTemplateName.value = ''
   stageConfigOpen.value = true
+  loadStageTemplates()
 }
 
 function addStage() {
@@ -264,6 +315,27 @@ function addStage() {
 
 function removeStage(i: number) {
   stagesEdit.value.splice(i, 1)
+}
+
+// ── Riordinamento stage via drag & drop ──────────────────────────────────────
+const stageDragIndex = ref<number | null>(null)
+
+function onStageDragStart(i: number) {
+  stageDragIndex.value = i
+}
+
+function onStageDragOver(e: DragEvent, i: number) {
+  e.preventDefault()
+  if (stageDragIndex.value === null || stageDragIndex.value === i) return
+  const arr = [...stagesEdit.value]
+  const [moved] = arr.splice(stageDragIndex.value, 1)
+  arr.splice(i, 0, moved)
+  stagesEdit.value = arr
+  stageDragIndex.value = i
+}
+
+function onStageDragEnd() {
+  stageDragIndex.value = null
 }
 
 async function saveStages() {
@@ -278,6 +350,46 @@ async function saveStages() {
     toast.add({ title: e.message, color: 'error' })
   } finally {
     savingStages.value = false
+  }
+}
+
+// ─── Rinomina datasource ─────────────────────────────────────────────────────
+const renameOpen = ref(false)
+const renameLabel = ref('')
+
+function openRename() {
+  renameLabel.value = datasource.value?.label ?? ''
+  renameOpen.value = true
+}
+
+async function confirmRename() {
+  const label = renameLabel.value.trim()
+  if (!label) return
+  try {
+    await api.patch(`/datasources/${datasourceId.value}/`, { label })
+    await dsStore.fetch()
+    renameOpen.value = false
+    toast.add({ title: 'Datasource rinominato.', color: 'success' })
+  } catch (e: any) {
+    toast.add({ title: e.message, color: 'error' })
+  }
+}
+
+// ─── Elimina datasource ──────────────────────────────────────────────────────
+const deleteDsOpen = ref(false)
+const deleteDsLoading = ref(false)
+
+async function confirmDeleteDs() {
+  deleteDsLoading.value = true
+  try {
+    await api.del(`/datasources/${datasourceId.value}/`)
+    await dsStore.fetch()
+    toast.add({ title: 'Foglio eliminato.', color: 'success' })
+    router.push('/dashboard')
+  } catch (e: any) {
+    toast.add({ title: e.message, color: 'error' })
+  } finally {
+    deleteDsLoading.value = false
   }
 }
 
@@ -381,14 +493,25 @@ await loadRecords()
     <!-- Toolbar -->
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <div class="flex items-center gap-3">
-        <div>
-          <h1 class="text-2xl font-semibold">{{ datasource?.source_file ?? datasource?.label }}</h1>
-          <p class="text-sm text-gray-500">{{ total }} record</p>
+        <div class="flex items-center gap-2">
+          <div>
+            <h1 class="text-2xl font-semibold">{{ datasource?.source_file ?? datasource?.label }}</h1>
+            <p class="text-sm text-gray-500">{{ total }} record</p>
+          </div>
+          <UDropdownMenu
+            :items="[
+              [{ label: 'Rinomina', icon: 'lucide:pencil', onSelect: openRename }],
+              [{ label: 'Elimina foglio', icon: 'lucide:trash-2', color: 'error', onSelect: () => deleteDsOpen = true }],
+            ]"
+          >
+            <UButton icon="lucide:ellipsis-vertical" variant="ghost" size="xs" color="neutral" />
+          </UDropdownMenu>
         </div>
         <USelect
           v-if="siblingSheets.length > 1"
           :model-value="datasourceId"
           :items="siblingSheets.map(s => ({ label: s.label, value: s.id }))"
+          class="min-w-48"
           @update:model-value="switchSheet"
         />
       </div>
@@ -512,7 +635,7 @@ await loadRecords()
         :records="kanbanRecords"
         :stages="datasource.stages"
         :columns="datasource?.columns ?? []"
-        @stage-changed="onStageChanged"
+        @dropped="onDropped"
         @open-edit="openEdit($event)"
       />
     </div>
@@ -674,8 +797,13 @@ await loadRecords()
           <div class="space-y-2">
             <div
               v-for="(stage, i) in stagesEdit"
-              :key="i"
-              class="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2"
+              :key="stage"
+              draggable="true"
+              class="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 transition-opacity"
+              :class="stageDragIndex === i ? 'opacity-40' : ''"
+              @dragstart="onStageDragStart(i)"
+              @dragover="onStageDragOver($event, i)"
+              @dragend="onStageDragEnd"
             >
               <UIcon name="lucide:grip-vertical" class="text-gray-400 cursor-grab" />
               <span class="flex-1 text-sm font-medium">{{ stage }}</span>
@@ -703,7 +831,7 @@ await loadRecords()
             <UButton icon="lucide:plus" @click="addStage" :disabled="!newStageName.trim()" />
           </div>
 
-          <!-- Suggerimenti -->
+          <!-- Suggerimenti rapidi -->
           <div class="flex flex-wrap gap-1">
             <span class="text-xs text-gray-400">Suggerimenti:</span>
             <UButton
@@ -714,12 +842,95 @@ await loadRecords()
               @click="stagesEdit.push(s)"
             >{{ s }}</UButton>
           </div>
+
+          <UDivider />
+
+          <!-- Modelli salvati -->
+          <div class="space-y-2">
+            <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Modelli salvati</p>
+
+            <div v-if="stageTemplates.length" class="space-y-1">
+              <div
+                v-for="t in stageTemplates"
+                :key="t.id"
+                class="flex items-center gap-2 rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-800 group"
+              >
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium truncate">{{ t.name }}</p>
+                  <p class="text-xs text-gray-400 truncate">{{ t.stages.join(' → ') }}</p>
+                </div>
+                <UButton size="xs" variant="soft" @click="loadTemplate(t)">Carica</UButton>
+                <UButton size="xs" variant="ghost" color="error" icon="lucide:trash-2" @click="deleteTemplate(t.id)" />
+              </div>
+            </div>
+            <p v-else class="text-xs text-gray-400">Nessun modello salvato.</p>
+
+            <!-- Salva come modello -->
+            <div v-if="!saveTemplateOpen">
+              <UButton
+                size="xs"
+                variant="outline"
+                icon="lucide:bookmark-plus"
+                :disabled="!stagesEdit.length"
+                @click="saveTemplateOpen = true"
+              >
+                Salva configurazione attuale come modello
+              </UButton>
+            </div>
+            <div v-else class="flex gap-2">
+              <UInput
+                v-model="newTemplateName"
+                placeholder="Nome modello..."
+                class="flex-1"
+                @keydown.enter="saveAsTemplate"
+                @keydown.escape="saveTemplateOpen = false"
+              />
+              <UButton icon="lucide:check" @click="saveAsTemplate" :disabled="!newTemplateName.trim()" />
+              <UButton variant="ghost" icon="lucide:x" @click="saveTemplateOpen = false" />
+            </div>
+          </div>
         </div>
       </template>
       <template #footer>
         <div class="flex gap-2 justify-end">
           <UButton variant="ghost" @click="stageConfigOpen = false">Annulla</UButton>
           <UButton :loading="savingStages" @click="saveStages">Salva</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Modal rinomina datasource -->
+    <UModal v-model:open="renameOpen">
+      <template #title>Rinomina foglio</template>
+      <template #body>
+        <UInput
+          v-model="renameLabel"
+          placeholder="Nome del foglio..."
+          autofocus
+          @keydown.enter="confirmRename"
+        />
+      </template>
+      <template #footer>
+        <div class="flex gap-2 justify-end">
+          <UButton variant="ghost" @click="renameOpen = false">Annulla</UButton>
+          <UButton :disabled="!renameLabel.trim()" @click="confirmRename">Salva</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Modal elimina datasource -->
+    <UModal v-model:open="deleteDsOpen">
+      <template #title>Elimina foglio</template>
+      <template #body>
+        <p class="text-sm">
+          Sei sicuro di voler eliminare <strong>{{ datasource?.label }}</strong>?
+          Verranno eliminati tutti i <strong>{{ total }}</strong> record e i relativi allegati. L'operazione non è reversibile.
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex gap-2 justify-end">
+          <UButton variant="ghost" @click="deleteDsOpen = false">Annulla</UButton>
+          <UButton color="error" :loading="deleteDsLoading" @click="confirmDeleteDs">Elimina</UButton>
         </div>
       </template>
     </UModal>

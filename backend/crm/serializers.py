@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from crm.models import Attachment, DataSource, Note, Record, RecordComment, RecordHistory, UserProfile
+from crm.models import Attachment, DataSource, Note, Record, RecordComment, RecordHistory, StageTemplate, UserProfile
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -61,6 +61,12 @@ class RecordCommentSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at']
 
 
+class StageTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StageTemplate
+        fields = ['id', 'name', 'stages']
+
+
 class NoteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Note
@@ -75,7 +81,7 @@ class RecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = Record
         fields = [
-            'id', 'data_source', 'data', 'is_active', 'is_favorite', 'stage',
+            'id', 'data_source', 'data', 'is_active', 'is_favorite', 'stage', 'position',
             'created_at', 'updated_at', 'attachments', 'history',
         ]
         read_only_fields = ['created_at', 'updated_at']

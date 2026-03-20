@@ -5,7 +5,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from crm.views import AttachmentViewSet, DataSourceViewSet, NoteViewSet, RecordCommentViewSet, RecordViewSet, UserProfileViewSet
+from crm.views import AttachmentViewSet, DataSourceViewSet, NoteViewSet, RecordCommentViewSet, RecordViewSet, StageTemplateViewSet, UserProfileViewSet
 
 router = DefaultRouter()
 router.register(r'profile', UserProfileViewSet, basename='profile')
@@ -14,6 +14,7 @@ router.register(r'records', RecordViewSet, basename='record')
 router.register(r'attachments', AttachmentViewSet, basename='attachment')
 router.register(r'comments', RecordCommentViewSet, basename='comment')
 router.register(r'notes', NoteViewSet, basename='note')
+router.register(r'stage-templates', StageTemplateViewSet, basename='stage-template')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
