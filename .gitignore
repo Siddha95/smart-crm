@@ -109,11 +109,25 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Node.js (for frontend if any)
+# Node.js
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Nuxt
+frontend/.nuxt/
+frontend/.output/
+frontend/node_modules/
+
+# Media uploads (dati utente, non vanno in git)
+backend/media/
+
+# AI service env
+ai-service/.env
+
+# Virtual env
+venv/
 
 # IDE
 .vscode/
