@@ -13,7 +13,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
-        fields = ['id', 'username', 'email', 'personal_api_key', 'has_api_key']
+        fields = ['id', 'username', 'email', 'personal_api_key', 'has_api_key', 'ai_context']
         extra_kwargs = {'personal_api_key': {'write_only': True}}
 
 

@@ -63,6 +63,13 @@ class UserProfileViewSet(viewsets.ReadOnlyModelViewSet):
         profile.save(update_fields=['personal_api_key'])
         return Response({'detail': 'API key aggiornata.'})
 
+    @action(detail=True, methods=['patch'], url_path='ai-context')
+    def update_ai_context(self, request, pk=None):
+        profile = self.get_object()
+        profile.ai_context = request.data.get('ai_context', '')
+        profile.save(update_fields=['ai_context'])
+        return Response({'detail': 'Contesto AI aggiornato.'})
+
 
 class DataSourceViewSet(viewsets.ModelViewSet):
     serializer_class = DataSourceSerializer
@@ -334,10 +341,15 @@ class RecordViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        from crm.services.excel_import import INSERT_DATE_COL
+        import datetime as _dt
         data_source = serializer.validated_data.get('data_source')
         if data_source and data_source.owner != self.request.user:
             raise PermissionDenied('Non hai accesso a questo DataSource.')
-        serializer.save()
+        data = dict(serializer.validated_data.get('data', {}))
+        if data_source and INSERT_DATE_COL in (data_source.columns or []):
+            data.setdefault(INSERT_DATE_COL, _dt.datetime.now().strftime('%d/%m/%Y'))
+        serializer.save(data=data)
 
     def perform_update(self, serializer):
         record = self.get_object()

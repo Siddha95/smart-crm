@@ -8,6 +8,8 @@ from django.db import transaction
 
 from crm.models import DataSource, Record
 
+INSERT_DATE_COL = 'Data inserimento'
+
 
 def clean_row(row: dict) -> dict:
     """Converte i valori pandas/numpy in tipi Python nativi serializzabili in JSON."""
@@ -16,15 +18,17 @@ def clean_row(row: dict) -> dict:
         if v is pd.NaT or (isinstance(v, float) and math.isnan(v)):
             result[k] = None
         elif isinstance(v, pd.Timestamp):
-            result[k] = v.isoformat()
+            result[k] = v.strftime('%d/%m/%Y')
         elif isinstance(v, np.integer):
             result[k] = int(v)
         elif isinstance(v, np.floating):
             result[k] = None if np.isnan(v) else float(v)
         elif isinstance(v, np.bool_):
             result[k] = bool(v)
-        elif isinstance(v, (datetime.datetime, datetime.date)):
-            result[k] = v.isoformat()
+        elif isinstance(v, datetime.datetime):
+            result[k] = v.strftime('%d/%m/%Y')
+        elif isinstance(v, datetime.date):
+            result[k] = v.strftime('%d/%m/%Y')
         else:
             result[k] = v
     return result
@@ -71,15 +75,19 @@ def _import_sheet(filepath: str, sheet_name: str, source_file: str, embedding_pr
     df = load_sheet(filepath, sheet_name)
     # Normalizza i nomi colonna a stringa (pandas può restituire int se l'header è numerico)
     df.columns = [str(c).strip() for c in df.columns]
-    columns = list(df.columns)
+    # Rimuovi eventuale colonna già presente (es. reimport) e aggiungila alla fine
+    columns = [c for c in df.columns if c != INSERT_DATE_COL] + [INSERT_DATE_COL]
 
     # Nome interno univoco: {source_file}_{sheet_name}
     ds_name = f"{source_file}_{sheet_name}"
     data_source = _sync_data_source(ds_name, sheet_name, columns, source_file, owner)
 
+    today = datetime.datetime.now().strftime('%d/%m/%Y')
     records = []
     for _, row in df.iterrows():
         data = clean_row(row.to_dict())
+        data.pop(INSERT_DATE_COL, None)   # rimuovi se già presente nel file
+        data[INSERT_DATE_COL] = today
         embedding = embedding_provider.embed_record(data) if embedding_provider else None
         records.append(Record(data_source=data_source, data=data, embedding=embedding))
 

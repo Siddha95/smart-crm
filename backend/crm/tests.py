@@ -822,3 +822,324 @@ class NoteViewSetTest(TestCase):
     def test_note_default_content_is_empty(self):
         note = Note.objects.create(owner=self.user, title='Vuota')
         self.assertEqual(note.content, '')
+
+
+# ── StageTemplateViewSet ───────────────────────────────────────────────────────
+
+from crm.models import StageTemplate
+from crm.services.excel_import import INSERT_DATE_COL
+import datetime
+
+
+class StageTemplateViewSetTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('stuser', password='pw')
+        self.other = User.objects.create_user('stother', password='pw')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    # ── CRUD ──────────────────────────────────────────────────────────────────
+
+    def test_create_template(self):
+        res = self.client.post('/api/stage-templates/', {
+            'name': 'Pipeline vendite', 'stages': ['Lead', 'Contattato', 'Chiuso']
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['stages'], ['Lead', 'Contattato', 'Chiuso'])
+
+    def test_list_own_templates(self):
+        StageTemplate.objects.create(owner=self.user, name='A', stages=['X'])
+        StageTemplate.objects.create(owner=self.user, name='B', stages=['Y'])
+        res = self.client.get('/api/stage-templates/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 2)
+
+    def test_retrieve_own_template(self):
+        t = StageTemplate.objects.create(owner=self.user, name='T', stages=['S1'])
+        res = self.client.get(f'/api/stage-templates/{t.id}/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['name'], 'T')
+
+    def test_update_template(self):
+        t = StageTemplate.objects.create(owner=self.user, name='Old', stages=['A'])
+        res = self.client.patch(f'/api/stage-templates/{t.id}/', {'name': 'New'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        t.refresh_from_db()
+        self.assertEqual(t.name, 'New')
+
+    def test_delete_template(self):
+        t = StageTemplate.objects.create(owner=self.user, name='Del', stages=['A'])
+        res = self.client.delete(f'/api/stage-templates/{t.id}/')
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(StageTemplate.objects.filter(id=t.id).exists())
+
+    # ── Owner isolation ────────────────────────────────────────────────────────
+
+    def test_other_user_templates_not_listed(self):
+        StageTemplate.objects.create(owner=self.other, name='Private', stages=['X'])
+        res = self.client.get('/api/stage-templates/')
+        self.assertEqual(len(res.data), 0)
+
+    def test_cannot_retrieve_other_user_template(self):
+        t = StageTemplate.objects.create(owner=self.other, name='Private', stages=['X'])
+        res = self.client.get(f'/api/stage-templates/{t.id}/')
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_cannot_update_other_user_template(self):
+        t = StageTemplate.objects.create(owner=self.other, name='Private', stages=['X'])
+        res = self.client.patch(f'/api/stage-templates/{t.id}/', {'name': 'Hacked'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_cannot_delete_other_user_template(self):
+        t = StageTemplate.objects.create(owner=self.other, name='Private', stages=['X'])
+        res = self.client.delete(f'/api/stage-templates/{t.id}/')
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(StageTemplate.objects.filter(id=t.id).exists())
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+
+    def test_unauthenticated_cannot_list(self):
+        res = APIClient().get('/api/stage-templates/')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── Ordering ──────────────────────────────────────────────────────────────
+
+    def test_templates_ordered_alphabetically(self):
+        StageTemplate.objects.create(owner=self.user, name='Zebra', stages=[])
+        StageTemplate.objects.create(owner=self.user, name='Alpha', stages=[])
+        res = self.client.get('/api/stage-templates/')
+        self.assertEqual(res.data[0]['name'], 'Alpha')
+        self.assertEqual(res.data[1]['name'], 'Zebra')
+
+    # ── Owner non esposto ─────────────────────────────────────────────────────
+
+    def test_owner_not_in_response(self):
+        res = self.client.post('/api/stage-templates/', {'name': 'X', 'stages': []}, format='json')
+        self.assertNotIn('owner', res.data)
+
+
+# ── Record reorder ─────────────────────────────────────────────────────────────
+
+class RecordReorderTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('reorder_user', password='pw')
+        self.other = User.objects.create_user('reorder_other', password='pw')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.ds = DataSource.objects.create(
+            owner=self.user, name='DS', label='DS', columns=['nome']
+        )
+        self.r1 = Record.objects.create(data_source=self.ds, data={'nome': 'A'}, position=0)
+        self.r2 = Record.objects.create(data_source=self.ds, data={'nome': 'B'}, position=1)
+        self.r3 = Record.objects.create(data_source=self.ds, data={'nome': 'C'}, position=2)
+
+    def test_reorder_changes_positions(self):
+        res = self.client.post('/api/records/reorder/', {
+            'ids': [self.r3.id, self.r1.id, self.r2.id]
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.r1.refresh_from_db(); self.r2.refresh_from_db(); self.r3.refresh_from_db()
+        self.assertEqual(self.r3.position, 0)
+        self.assertEqual(self.r1.position, 1)
+        self.assertEqual(self.r2.position, 2)
+
+    def test_reorder_returns_updated_count(self):
+        res = self.client.post('/api/records/reorder/', {
+            'ids': [self.r1.id, self.r2.id]
+        }, format='json')
+        self.assertEqual(res.data['updated'], 2)
+
+    def test_reorder_ignores_other_user_records(self):
+        other_ds = DataSource.objects.create(
+            owner=self.other, name='ODS', label='ODS', columns=['x']
+        )
+        other_r = Record.objects.create(data_source=other_ds, data={'x': '1'}, position=99)
+        self.client.post('/api/records/reorder/', {
+            'ids': [other_r.id, self.r1.id]
+        }, format='json')
+        other_r.refresh_from_db()
+        self.assertEqual(other_r.position, 99)  # non modificato
+
+    def test_reorder_missing_ids_returns_400(self):
+        res = self.client.post('/api/records/reorder/', {}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unauthenticated_cannot_reorder(self):
+        res = APIClient().post('/api/records/reorder/', {'ids': [self.r1.id]}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_kanban_ordering_by_position(self):
+        self.r1.position = 2; self.r1.save()
+        self.r2.position = 0; self.r2.save()
+        self.r3.position = 1; self.r3.save()
+        res = self.client.get(f'/api/records/?data_source={self.ds.id}&ordering=position&page_size=10')
+        ids = [r['id'] for r in res.data['results']]
+        self.assertEqual(ids, [self.r2.id, self.r3.id, self.r1.id])
+
+
+# ── INSERT_DATE_COL (Data inserimento) ────────────────────────────────────────
+
+class InsertDateColumnTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('insdate_user', password='pw')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def _make_excel(self, rows, sheet='Foglio'):
+        wb = openpyxl.Workbook()
+        ws = wb.active; ws.title = sheet
+        if rows:
+            ws.append(list(rows[0].keys()))
+            for r in rows: ws.append(list(r.values()))
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as f:
+            wb.save(f.name); return f.name
+
+    def test_import_adds_insert_date_column(self):
+        path = self._make_excel([{'nome': 'Mario'}])
+        try:
+            import_all_sheets(path, source_file='test', owner=self.user)
+        finally:
+            os.unlink(path)
+        ds = DataSource.objects.get(owner=self.user)
+        self.assertIn(INSERT_DATE_COL, ds.columns)
+        self.assertEqual(ds.columns[-1], INSERT_DATE_COL)  # ultima colonna
+
+    def test_import_populates_insert_date_value(self):
+        path = self._make_excel([{'nome': 'Mario'}])
+        today = datetime.date.today().strftime('%d/%m/%Y')
+        try:
+            import_all_sheets(path, source_file='test', owner=self.user)
+        finally:
+            os.unlink(path)
+        record = Record.objects.filter(data_source__owner=self.user).first()
+        self.assertEqual(record.data[INSERT_DATE_COL], today)
+
+    def test_reimport_updates_insert_date(self):
+        path = self._make_excel([{'nome': 'Mario'}])
+        try:
+            import_all_sheets(path, source_file='test', owner=self.user)
+            import_all_sheets(path, source_file='test', owner=self.user)
+        finally:
+            os.unlink(path)
+        today = datetime.date.today().strftime('%d/%m/%Y')
+        record = Record.objects.filter(data_source__owner=self.user).first()
+        self.assertEqual(record.data[INSERT_DATE_COL], today)
+
+    def test_existing_insert_date_column_in_file_is_overwritten(self):
+        """Se il file Excel ha già una colonna 'Data inserimento', viene ignorata e rigenerata."""
+        path = self._make_excel([{INSERT_DATE_COL: '01/01/2000', 'nome': 'X'}])
+        today = datetime.date.today().strftime('%d/%m/%Y')
+        try:
+            import_all_sheets(path, source_file='test', owner=self.user)
+        finally:
+            os.unlink(path)
+        record = Record.objects.filter(data_source__owner=self.user).first()
+        self.assertEqual(record.data[INSERT_DATE_COL], today)
+
+    def test_manual_record_creation_auto_populates_insert_date(self):
+        ds = DataSource.objects.create(
+            owner=self.user, name='DS', label='DS',
+            columns=['nome', INSERT_DATE_COL]
+        )
+        today = datetime.date.today().strftime('%d/%m/%Y')
+        res = self.client.post('/api/records/', {
+            'data_source': ds.id, 'data': {'nome': 'Test'}
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['data'][INSERT_DATE_COL], today)
+
+    def test_datasource_without_insert_date_not_affected(self):
+        """Datasource senza la colonna non deve ricevere il campo automatico."""
+        ds = DataSource.objects.create(
+            owner=self.user, name='DS2', label='DS2', columns=['nome']
+        )
+        res = self.client.post('/api/records/', {
+            'data_source': ds.id, 'data': {'nome': 'Test'}
+        }, format='json')
+        self.assertNotIn(INSERT_DATE_COL, res.data['data'])
+
+
+# ── CleanRow: tipi datetime nativi Python ─────────────────────────────────────
+
+class CleanRowDatetimeTest(TestCase):
+    def test_python_datetime_formatted(self):
+        row = {'ts': datetime.datetime(2024, 6, 15, 10, 30, 0)}
+        self.assertEqual(clean_row(row)['ts'], '15/06/2024')
+
+    def test_python_date_formatted(self):
+        row = {'d': datetime.date(2024, 1, 5)}
+        self.assertEqual(clean_row(row)['d'], '05/01/2024')
+
+    def test_datetime_no_time_component_in_output(self):
+        row = {'ts': datetime.datetime(2024, 12, 31, 23, 59, 59)}
+        result = clean_row(row)['ts']
+        self.assertNotIn('23:59', result)
+        self.assertEqual(result, '31/12/2024')
+
+
+# ── UserProfile ai_context ────────────────────────────────────────────────────
+
+from crm.models import UserProfile
+
+
+class UserProfileAiContextTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('ctx_user', password='pw')
+        self.other = User.objects.create_user('ctx_other', password='pw')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.profile, _ = UserProfile.objects.get_or_create(user=self.user)
+
+    def test_ai_context_returned_in_profile(self):
+        self.profile.ai_context = 'Lavoro nel settore edilizia'
+        self.profile.save()
+        res = self.client.get('/api/profile/')
+        self.assertEqual(res.data[0]['ai_context'], 'Lavoro nel settore edilizia')
+
+    def test_save_ai_context(self):
+        res = self.client.patch(
+            f'/api/profile/{self.profile.id}/ai-context/',
+            {'ai_context': 'Contesto di test'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.ai_context, 'Contesto di test')
+
+    def test_save_empty_context(self):
+        self.profile.ai_context = 'vecchio'
+        self.profile.save()
+        res = self.client.patch(
+            f'/api/profile/{self.profile.id}/ai-context/',
+            {'ai_context': ''},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.ai_context, '')
+
+    def test_cannot_update_other_user_context(self):
+        other_profile, _ = UserProfile.objects.get_or_create(user=self.other)
+        other_profile.ai_context = 'privato'
+        other_profile.save()
+        res = self.client.patch(
+            f'/api/profile/{other_profile.id}/ai-context/',
+            {'ai_context': 'hacked'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        other_profile.refresh_from_db()
+        self.assertEqual(other_profile.ai_context, 'privato')
+
+    def test_unauthenticated_cannot_update_context(self):
+        res = APIClient().patch(
+            f'/api/profile/{self.profile.id}/ai-context/',
+            {'ai_context': 'x'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_default_ai_context_is_empty(self):
+        new_user = User.objects.create_user('ctx_new', password='pw')
+        profile, _ = UserProfile.objects.get_or_create(user=new_user)
+        self.assertEqual(profile.ai_context, '')

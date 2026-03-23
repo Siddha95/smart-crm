@@ -1,35 +1,65 @@
 <script setup lang="ts">
-definePageMeta({ middleware: 'auth' })
+definePageMeta({ middleware: "auth" });
 
-const api = useApi()
-const toast = useToast()
+const api = useApi();
+const toast = useToast();
 
 // ─── Profilo ────────────────────────────────────────────────────────────────
-interface Profile { id: number; username: string; email: string; has_api_key: boolean }
+interface Profile {
+  id: number;
+  username: string;
+  email: string;
+  has_api_key: boolean;
+  ai_context: string;
+}
 
-const profiles = await api.get<Profile[]>('/profile/')
-const profile = profiles[0] ?? null
+const profiles = await api.get<Profile[]>("/profile/");
+const profile = profiles[0] ?? null;
 
 // ─── API Key ────────────────────────────────────────────────────────────────
 // Il valore della chiave non viene mai restituito dal server (write_only).
 // L'utente inserisce la nuova chiave solo quando vuole aggiornarla.
-const apiKey = ref('')
-const showKey = ref(false)
-const saving = ref(false)
+const apiKey = ref("");
+const showKey = ref(false);
+const saving = ref(false);
+
+// ─── Contesto AI ─────────────────────────────────────────────────────────────
+const aiContext = ref(profile?.ai_context ?? "");
+const savingContext = ref(false);
+
+async function saveAiContext() {
+  if (!profile) return;
+  savingContext.value = true;
+  try {
+    await api.patch(`/profile/${profile.id}/ai-context/`, {
+      ai_context: aiContext.value,
+    });
+    toast.add({ title: "Contesto AI salvato.", color: "success" });
+  } catch (e: any) {
+    toast.add({ title: e.message, color: "error" });
+  } finally {
+    savingContext.value = false;
+  }
+}
 
 async function saveKey(keyValue: string) {
-  if (!profile) return
-  saving.value = true
+  if (!profile) return;
+  saving.value = true;
   try {
-    await api.patch(`/profile/${profile.id}/api-key/`, { personal_api_key: keyValue })
-    toast.add({ title: keyValue ? 'API key salvata.' : 'API key rimossa.', color: 'success' })
-    if (profile) profile.has_api_key = !!keyValue
-    apiKey.value = ''
-    showKey.value = false
+    await api.patch(`/profile/${profile.id}/api-key/`, {
+      personal_api_key: keyValue,
+    });
+    toast.add({
+      title: keyValue ? "API key salvata." : "API key rimossa.",
+      color: "success",
+    });
+    if (profile) profile.has_api_key = !!keyValue;
+    apiKey.value = "";
+    showKey.value = false;
   } catch (e: any) {
-    toast.add({ title: e.message, color: 'error' })
+    toast.add({ title: e.message, color: "error" });
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 </script>
@@ -49,11 +79,11 @@ async function saveKey(keyValue: string) {
       <dl class="space-y-2 text-sm">
         <div class="flex gap-2">
           <dt class="text-gray-500 w-24 shrink-0">Username</dt>
-          <dd class="font-medium">{{ profile?.username ?? '—' }}</dd>
+          <dd class="font-medium">{{ profile?.username ?? "—" }}</dd>
         </div>
         <div class="flex gap-2">
           <dt class="text-gray-500 w-24 shrink-0">Email</dt>
-          <dd class="font-medium">{{ profile?.email ?? '—' }}</dd>
+          <dd class="font-medium">{{ profile?.email ?? "—" }}</dd>
         </div>
       </dl>
     </UCard>
@@ -69,17 +99,29 @@ async function saveKey(keyValue: string) {
 
       <div class="space-y-4">
         <p class="text-sm text-gray-500">
-          La chiave viene salvata sul server e non è mai visibile dopo il salvataggio.
-          Usala per abilitare l'assistente AI.
+          La chiave viene salvata sul server e non è mai visibile dopo il
+          salvataggio. Usala per abilitare l'assistente AI.
         </p>
 
         <div class="flex items-center gap-2 text-sm">
           <UIcon
-            :name="profile?.has_api_key ? 'lucide:check-circle' : 'lucide:x-circle'"
+            :name="
+              profile?.has_api_key ? 'lucide:check-circle' : 'lucide:x-circle'
+            "
             :class="profile?.has_api_key ? 'text-green-500' : 'text-gray-400'"
           />
-          <span :class="profile?.has_api_key ? 'text-green-600 dark:text-green-400' : 'text-gray-400'">
-            {{ profile?.has_api_key ? 'API key configurata' : 'Nessuna API key configurata' }}
+          <span
+            :class="
+              profile?.has_api_key
+                ? 'text-green-600 dark:text-green-400'
+                : 'text-gray-400'
+            "
+          >
+            {{
+              profile?.has_api_key
+                ? "API key configurata"
+                : "Nessuna API key configurata"
+            }}
           </span>
         </div>
 
@@ -121,6 +163,35 @@ async function saveKey(keyValue: string) {
             Rimuovi chiave
           </UButton>
         </div>
+      </div>
+    </UCard>
+    <!-- Contesto AI -->
+    <UCard>
+      <template #header>
+        <div class="flex items-center gap-2">
+          <UIcon name="lucide:brain" class="text-primary" />
+          <span class="font-medium">Contesto AI</span>
+        </div>
+      </template>
+      <div class="space-y-3">
+        <p class="text-sm text-gray-500">
+          Scrivi qui tutto quello che vuoi che l'assistente AI sappia su di te,
+          il tuo business e come lavori. Viene incluso in ogni conversazione
+          senza storico.
+        </p>
+        <textarea
+          v-model="aiContext"
+          rows="6"
+          placeholder="Es: Lavoro nel settore edilizia. I miei clienti principali sono aziende del nord-est. Preferisco risposte brevi e dirette. Non contattare mai i clienti segnati come inattivi..."
+          class="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent p-3 text-sm outline-none focus:ring-2 focus:ring-primary/40 resize-y placeholder-gray-400"
+        />
+        <UButton
+          icon="lucide:save"
+          :loading="savingContext"
+          @click="saveAiContext"
+        >
+          Salva contesto
+        </UButton>
       </div>
     </UCard>
   </div>

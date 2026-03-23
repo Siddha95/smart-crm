@@ -219,6 +219,12 @@ async function loadKanbanRecords() {
     params.set('data_source', String(datasourceId.value))
     params.set('page_size', '500')
     params.set('ordering', 'position')
+    if (search.value) params.set('search', search.value)
+    if (showOnlyFavorites.value) params.set('is_favorite', 'true')
+    const activeFilters = Object.fromEntries(
+      Object.entries(columnFilters.value).filter(([_, v]) => v)
+    )
+    if (Object.keys(activeFilters).length) params.set('col_filters', JSON.stringify(activeFilters))
     const data = await api.get<{ count: number; results: any[] }>(`/records/?${params}`)
     kanbanRecords.value = data.results
   } catch (e: any) {
@@ -229,15 +235,8 @@ async function loadKanbanRecords() {
 }
 
 async function onDropped(recordId: number, newStage: string, orderedIds: number[]) {
-  // Ottimistic update stage sul record locale
-  const r = kanbanRecords.value.find(r => r.id === recordId)
-  const stageChanged = r && r.stage !== newStage
-  if (r) r.stage = newStage
-
   try {
-    // Salva stage se cambiato
-    if (stageChanged) await api.patch(`/records/${recordId}/`, { stage: newStage })
-    // Salva sempre l'ordine
+    await api.patch(`/records/${recordId}/`, { stage: newStage })
     await api.post('/records/reorder/', { ids: orderedIds })
   } catch (e: any) {
     toast.add({ title: e.message, color: 'error' })
@@ -353,43 +352,60 @@ async function saveStages() {
   }
 }
 
-// ─── Rinomina datasource ─────────────────────────────────────────────────────
+// ─── Rinomina / Elimina foglio (qualsiasi del gruppo) ────────────────────────
 const renameOpen = ref(false)
 const renameLabel = ref('')
+const renameTargetId = ref<number | null>(null)
 
-function openRename() {
-  renameLabel.value = datasource.value?.label ?? ''
+function openRename(id?: number) {
+  renameTargetId.value = id ?? datasourceId.value
+  const ds = id ? dsStore.list.find(d => d.id === id) : datasource.value
+  renameLabel.value = ds?.label ?? ''
   renameOpen.value = true
 }
 
 async function confirmRename() {
   const label = renameLabel.value.trim()
-  if (!label) return
+  if (!label || !renameTargetId.value) return
   try {
-    await api.patch(`/datasources/${datasourceId.value}/`, { label })
+    await api.patch(`/datasources/${renameTargetId.value}/`, { label })
     await dsStore.fetch()
     renameOpen.value = false
-    toast.add({ title: 'Datasource rinominato.', color: 'success' })
+    toast.add({ title: 'Foglio rinominato.', color: 'success' })
   } catch (e: any) {
     toast.add({ title: e.message, color: 'error' })
   }
 }
 
-// ─── Elimina datasource ──────────────────────────────────────────────────────
 const deleteDsOpen = ref(false)
 const deleteDsLoading = ref(false)
+const deleteDsTarget = ref<{ id: number; label: string } | null>(null)
+
+function openDeleteDs(id?: number) {
+  const ds = id ? dsStore.list.find(d => d.id === id) : datasource.value
+  if (!ds) return
+  deleteDsTarget.value = { id: ds.id, label: ds.label }
+  deleteDsOpen.value = true
+}
 
 async function confirmDeleteDs() {
+  if (!deleteDsTarget.value) return
   deleteDsLoading.value = true
   try {
-    await api.del(`/datasources/${datasourceId.value}/`)
+    const isCurrentSheet = deleteDsTarget.value.id === datasourceId.value
+    await api.del(`/datasources/${deleteDsTarget.value.id}/`)
     await dsStore.fetch()
+    deleteDsOpen.value = false
     toast.add({ title: 'Foglio eliminato.', color: 'success' })
-    router.push('/dashboard')
+    if (isCurrentSheet) {
+      const remaining = siblingSheets.value.filter(s => s.id !== deleteDsTarget.value!.id)
+      router.push(remaining.length ? `/source/${remaining[0].id}` : '/dashboard')
+    }
   } catch (e: any) {
     toast.add({ title: e.message, color: 'error' })
   } finally {
     deleteDsLoading.value = false
+    deleteDsTarget.value = null
   }
 }
 
@@ -403,11 +419,47 @@ async function exportAs(fmt: 'xlsx' | 'pdf') {
   }
 }
 
-// ─── Drawer edit / nuovo ───────────────────────────────────────────────────
+// ─── Drawer edit / nuovo record ────────────────────────────────────────────
 const editRecord = ref<any>(null)
 const drawerOpen = ref(false)
 
 function openNew() { editRecord.value = null; drawerOpen.value = true }
+
+// ─── Nuova pagina (foglio) ──────────────────────────────────────────────────
+const newPageOpen = ref(false)
+const newPageLabel = ref('')
+const newPageInheritColumns = ref(true)
+const newPageLoading = ref(false)
+
+function openNewPage() {
+  newPageLabel.value = ''
+  newPageInheritColumns.value = true
+  newPageOpen.value = true
+}
+
+async function confirmNewPage() {
+  const label = newPageLabel.value.trim()
+  if (!label) return
+  newPageLoading.value = true
+  try {
+    const sf = datasource.value?.source_file ?? datasource.value?.label ?? label
+    const columns = newPageInheritColumns.value ? (datasource.value?.columns ?? []) : []
+    const created = await api.post<{ id: number }>('/datasources/', {
+      label,
+      name: `${sf}_${label}`,
+      columns,
+      source_file: sf,
+    })
+    await dsStore.fetch()
+    newPageOpen.value = false
+    newPageLabel.value = ''
+    router.push(`/source/${created.id}`)
+  } catch (e: any) {
+    toast.add({ title: e.message, color: 'error' })
+  } finally {
+    newPageLoading.value = false
+  }
+}
 function openEdit(record: any) { editRecord.value = record; drawerOpen.value = true }
 function onSaved() { drawerOpen.value = false; loadRecords() }
 function onDeleted() { drawerOpen.value = false; loadRecords() }
@@ -456,13 +508,15 @@ async function onColumnsUpdated() {
 // ─── Watch (dopo tutte le dichiarazioni) ───────────────────────────────────
 watch(search, () => {
   page.value = 1
-  debouncedLoadRecords()
+  if (view.value === 'kanban') loadKanbanRecords()
+  else debouncedLoadRecords()
 })
 watch([sortCol, sortDesc, showOnlyFavorites, columnFilters], () => {
   page.value = 1
-  loadRecords()
+  if (view.value === 'kanban') loadKanbanRecords()
+  else loadRecords()
 }, { deep: true })
-watch(showFilters, (v) => { if (!v) { clearFilters() } })
+watch(showFilters, (v) => { if (!v) clearFilters() })
 watch(page, loadRecords)
 watch(datasourceId, () => {
   page.value = 1
@@ -498,14 +552,6 @@ await loadRecords()
             <h1 class="text-2xl font-semibold">{{ datasource?.source_file ?? datasource?.label }}</h1>
             <p class="text-sm text-gray-500">{{ total }} record</p>
           </div>
-          <UDropdownMenu
-            :items="[
-              [{ label: 'Rinomina', icon: 'lucide:pencil', onSelect: openRename }],
-              [{ label: 'Elimina foglio', icon: 'lucide:trash-2', color: 'error', onSelect: () => deleteDsOpen = true }],
-            ]"
-          >
-            <UButton icon="lucide:ellipsis-vertical" variant="ghost" size="xs" color="neutral" />
-          </UDropdownMenu>
         </div>
         <USelect
           v-if="siblingSheets.length > 1"
@@ -514,6 +560,14 @@ await loadRecords()
           class="min-w-48"
           @update:model-value="switchSheet"
         />
+        <UDropdownMenu
+          :items="[
+            [{ label: 'Rinomina', icon: 'lucide:pencil', onSelect: () => openRename() }],
+            [{ label: 'Elimina foglio', icon: 'lucide:trash-2', color: 'error', onSelect: () => openDeleteDs() }],
+          ]"
+        >
+          <UButton icon="lucide:ellipsis-vertical" variant="ghost" size="xs" color="neutral" />
+        </UDropdownMenu>
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
@@ -574,7 +628,14 @@ await loadRecords()
           />
         </div>
         <UButton icon="lucide:bot" variant="outline" @click="chatStore.openFor(datasourceId.value)">AI</UButton>
-        <UButton icon="lucide:plus" @click="openNew">Aggiungi</UButton>
+        <UDropdownMenu
+          :items="[
+            [{ label: 'Nuovo record', icon: 'lucide:file-plus', onSelect: openNew }],
+            [{ label: 'Nuova pagina', icon: 'lucide:layout-panel-left', onSelect: openNewPage }],
+          ]"
+        >
+          <UButton icon="lucide:plus" trailing-icon="lucide:chevron-down">Aggiungi</UButton>
+        </UDropdownMenu>
       </div>
     </div>
 
@@ -899,6 +960,34 @@ await loadRecords()
       </template>
     </UModal>
 
+    <!-- Modal nuova pagina -->
+    <UModal v-model:open="newPageOpen">
+      <template #title>Nuova pagina</template>
+      <template #body>
+        <div class="space-y-3">
+          <p class="text-sm text-gray-500">
+            Aggiungi un nuovo foglio al datasource <strong>{{ datasource?.source_file ?? datasource?.label }}</strong>.
+          </p>
+          <UInput
+            v-model="newPageLabel"
+            placeholder="Nome del foglio (es. Archivio, Q1 2026…)"
+            autofocus
+            @keydown.enter="confirmNewPage"
+          />
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input v-model="newPageInheritColumns" type="checkbox" class="rounded" />
+            Eredita le stesse colonne di questo foglio
+          </label>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex gap-2 justify-end">
+          <UButton variant="ghost" @click="newPageOpen = false">Annulla</UButton>
+          <UButton :loading="newPageLoading" :disabled="!newPageLabel.trim()" @click="confirmNewPage">Crea</UButton>
+        </div>
+      </template>
+    </UModal>
+
     <!-- Modal rinomina datasource -->
     <UModal v-model:open="renameOpen">
       <template #title>Rinomina foglio</template>
@@ -923,8 +1012,8 @@ await loadRecords()
       <template #title>Elimina foglio</template>
       <template #body>
         <p class="text-sm">
-          Sei sicuro di voler eliminare <strong>{{ datasource?.label }}</strong>?
-          Verranno eliminati tutti i <strong>{{ total }}</strong> record e i relativi allegati. L'operazione non è reversibile.
+          Sei sicuro di voler eliminare <strong>{{ deleteDsTarget?.label }}</strong>?
+          Tutti i record e allegati verranno eliminati. L'operazione non è reversibile.
         </p>
       </template>
       <template #footer>

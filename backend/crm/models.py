@@ -8,6 +8,7 @@ class UserProfile(models.Model):
   '''Profilo esteso per ogni collaboratore'''
   user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
   personal_api_key = models.CharField(max_length=500, blank=True, null=True)
+  ai_context = models.TextField(blank=True, default='')
 
   def __str__(self):
     return self.user.username

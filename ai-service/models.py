@@ -11,6 +11,7 @@ class UserProfile(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("auth_user.id"), unique=True)
     personal_api_key = Column(String(500), nullable=True)
+    ai_context = Column(String, nullable=True, default='')
 
 
 class DataSource(Base):

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_embedding_provider_dep, get_user_ai_provider, get_user_embedding_provider, get_user_id
-from models import DataSource, Record
+from models import DataSource, Record, UserProfile
 from services.ai.base import AIProvider
 from services.ai import prompts
 from services.ai.tools import TOOLS_CLAUDE, execute_tool
@@ -120,6 +120,11 @@ def _serialize_record(r: Record) -> str:
     return f"[{r.id}] " + ", ".join(f"{k}: {v}" for k, v in fields.items())
 
 
+def _get_user_ai_context(db: Session, owner_id: int) -> str:
+    profile = db.query(UserProfile).filter(UserProfile.user_id == owner_id).first()
+    return (profile.ai_context or '').strip() if profile else ''
+
+
 def _run_chat(
     question: str,
     records: list[Record],
@@ -128,8 +133,11 @@ def _run_chat(
     owner_id: int,
 ) -> dict:
     context_rows = "\n".join(_serialize_record(r) for r in records)
+    user_context = _get_user_ai_context(db, owner_id)
+    user_context_block = f"\nContesto utente:\n{user_context}\n" if user_context else ""
     system_prompt = (
-        "Assistente CRM. Record disponibili (formato: [ID] campo: valore):\n"
+        f"Assistente CRM.{user_context_block}\n"
+        "Record disponibili (formato: [ID] campo: valore):\n"
         f"{context_rows}\n\n"
         "Puoi rispondere, modificare campi ed eliminare record con i tool. "
         "Chiedi conferma prima di eliminare. Rispondi in italiano."
