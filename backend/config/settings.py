@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'pgvector.django',
     'crm',
@@ -94,7 +95,7 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),    # dura una giornata lavorativa
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),   # rinnovo per un mese
     'ROTATE_REFRESH_TOKENS': True,                  # ogni refresh emette un nuovo refresh token
-    'BLACKLIST_AFTER_ROTATION': False,
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 REST_FRAMEWORK = {

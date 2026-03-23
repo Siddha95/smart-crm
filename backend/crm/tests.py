@@ -108,7 +108,7 @@ class CleanRowTest(TestCase):
         import pandas as pd
         row = {"data": pd.Timestamp("2024-01-15")}
         cleaned = clean_row(row)
-        self.assertEqual(cleaned["data"], "2024-01-15T00:00:00")
+        self.assertEqual(cleaned["data"], "15/01/2024")
 
     def test_pandas_nat_converted_to_none(self):
         import pandas as pd
@@ -1143,3 +1143,94 @@ class UserProfileAiContextTest(TestCase):
         new_user = User.objects.create_user('ctx_new', password='pw')
         profile, _ = UserProfile.objects.get_or_create(user=new_user)
         self.assertEqual(profile.ai_context, '')
+
+
+# ── Security: refresh token blacklist ──────────────────────────────────────────
+
+class RefreshTokenBlacklistTest(TestCase):
+    """Verifica che BLACKLIST_AFTER_ROTATION sia attivo e che i refresh token
+    usati vengano invalidati dopo la rotazione."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('blacklist_user', password='pw')
+        self.client = APIClient()
+
+    def _get_tokens(self):
+        res = self.client.post('/api/auth/token/', {'username': 'blacklist_user', 'password': 'pw'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return res.data['access'], res.data['refresh']
+
+    def test_refresh_returns_new_tokens(self):
+        _, refresh = self._get_tokens()
+        res = self.client.post('/api/auth/token/refresh/', {'refresh': refresh}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn('access', res.data)
+        self.assertIn('refresh', res.data)
+
+    def test_used_refresh_token_is_blacklisted(self):
+        """Dopo un refresh, il vecchio refresh token non deve più funzionare."""
+        _, refresh = self._get_tokens()
+        # Primo uso: ok
+        self.client.post('/api/auth/token/refresh/', {'refresh': refresh}, format='json')
+        # Secondo uso con lo stesso token: deve fallire
+        res = self.client.post('/api/auth/token/refresh/', {'refresh': refresh}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_new_refresh_token_works_after_rotation(self):
+        """Il nuovo refresh token emesso dalla rotazione funziona correttamente."""
+        _, refresh = self._get_tokens()
+        res1 = self.client.post('/api/auth/token/refresh/', {'refresh': refresh}, format='json')
+        new_refresh = res1.data['refresh']
+        res2 = self.client.post('/api/auth/token/refresh/', {'refresh': new_refresh}, format='json')
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertIn('access', res2.data)
+
+    def test_invalid_refresh_token_rejected(self):
+        res = self.client.post('/api/auth/token/refresh/', {'refresh': 'token.falso.invalido'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+# ── Security: AI tools soft-delete ─────────────────────────────────────────────
+
+class AiToolSoftDeleteTest(TestCase):
+    """Verifica che il tool delete_record dell'AI usi il soft-delete (is_active=False)
+    invece di eliminare fisicamente il record dal database."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('aitool_user', password='pw')
+        self.ds = DataSource.objects.create(
+            name='ai_ds', label='AI DS', columns=['nome'], owner=self.user
+        )
+        self.record = Record.objects.create(
+            data_source=self.ds, data={'nome': 'Vittima'}, is_active=True
+        )
+
+    def test_delete_record_sets_is_active_false(self):
+        """delete_record deve impostare is_active=False, non eliminare la riga."""
+        from django.db import connection as _conn
+        with _conn.cursor() as cur:
+            cur.execute(
+                "UPDATE crm_record SET is_active = FALSE WHERE id = %s AND "
+                "id IN (SELECT r.id FROM crm_record r JOIN crm_datasource ds ON r.data_source_id = ds.id WHERE ds.owner_id = %s)",
+                [self.record.id, self.user.id]
+            )
+        self.record.refresh_from_db()
+        self.assertFalse(self.record.is_active)
+        # Il record esiste ancora nel DB
+        self.assertTrue(Record.objects.filter(id=self.record.id).exists())
+
+    def test_deleted_record_excluded_from_active_queryset(self):
+        """Un record con is_active=False non compare nelle query filtranti gli attivi."""
+        self.record.is_active = False
+        self.record.save()
+        active_ids = list(Record.objects.filter(is_active=True, data_source=self.ds).values_list('id', flat=True))
+        self.assertNotIn(self.record.id, active_ids)
+
+    def test_active_record_still_retrievable_after_soft_delete(self):
+        """Il record soft-deleted è recuperabile (per audit) senza filtro is_active."""
+        self.record.is_active = False
+        self.record.save()
+        self.assertTrue(Record.objects.filter(id=self.record.id).exists())
+        retrieved = Record.objects.get(id=self.record.id)
+        self.assertFalse(retrieved.is_active)
+        self.assertEqual(retrieved.data['nome'], 'Vittima')

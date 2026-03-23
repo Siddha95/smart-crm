@@ -69,8 +69,8 @@ def execute_tool(name: str, inputs: dict, db: Session, owner_id: int) -> str:
         )
         if not record:
             return f"Errore: record {inputs['record_id']} non trovato o non autorizzato."
-        db.delete(record)
+        record.is_active = False
         db.commit()
-        return f"✓ Record {inputs['record_id']} eliminato con successo."
+        return f"✓ Record {inputs['record_id']} disattivato con successo."
 
     return f"Tool '{name}' non riconosciuto."

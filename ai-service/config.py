@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     db_host: str = "localhost"
     db_port: int = 5432
 
+    allowed_origins: list[str] = ["http://localhost:3000"]
+
     class Config:
         env_file = ".env"
 
