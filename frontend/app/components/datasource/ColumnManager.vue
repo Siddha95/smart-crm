@@ -59,6 +59,35 @@ async function deleteColumn() {
   }
 }
 
+// ─── Riordina colonne via drag & drop ──────────────────────────────────────
+const dragIndex = ref<number | null>(null)
+
+function onDragStart(i: number) {
+  dragIndex.value = i
+}
+
+function onDragOver(e: DragEvent, i: number) {
+  e.preventDefault()
+  if (dragIndex.value === null || dragIndex.value === i) return
+  const arr = [...cols.value]
+  const [moved] = arr.splice(dragIndex.value, 1)
+  arr.splice(i, 0, moved)
+  cols.value = arr
+  dragIndex.value = i
+}
+
+async function onDragEnd() {
+  dragIndex.value = null
+  try {
+    await api.post(`/datasources/${props.datasourceId}/columns/`, {
+      operation: 'reorder', columns: cols.value,
+    })
+    emit('updated')
+  } catch (e: any) {
+    toast.add({ title: e.message, color: 'error' })
+  }
+}
+
 // ─── Aggiungi colonna ──────────────────────────────────────────────────────
 const newColName = ref('')
 const adding = ref(false)
@@ -88,8 +117,15 @@ async function addColumn() {
     <div
       v-for="(col, i) in cols"
       :key="col"
-      class="flex items-center gap-2 group"
+      draggable="true"
+      class="flex items-center gap-2 group rounded px-1 transition-opacity"
+      :class="dragIndex === i ? 'opacity-40' : ''"
+      @dragstart="onDragStart(i)"
+      @dragover="onDragOver($event, i)"
+      @dragend="onDragEnd"
     >
+      <UIcon name="lucide:grip-vertical" class="text-gray-400 cursor-grab shrink-0" />
+
       <!-- Rinomina inline -->
       <template v-if="editingIndex === i">
         <UInput

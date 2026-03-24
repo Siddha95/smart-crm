@@ -132,8 +132,18 @@ class DataSourceViewSet(viewsets.ModelViewSet):
                         "UPDATE crm_record SET data = data - %s WHERE data_source_id = %s",
                         [name, ds.id],
                     )
+        elif operation == 'reorder':
+            new_order = request.data.get('columns', [])
+            if not isinstance(new_order, list) or set(new_order) != set(ds.columns):
+                return Response(
+                    {'detail': 'columns deve contenere esattamente le stesse colonne esistenti.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ds.columns = new_order
+            ds.save()
+
         else:
-            return Response({'detail': 'operation deve essere add, rename o delete.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'operation deve essere add, rename, delete o reorder.'}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(DataSourceSerializer(ds).data)
 
@@ -348,7 +358,7 @@ class RecordViewSet(viewsets.ModelViewSet):
             raise PermissionDenied('Non hai accesso a questo DataSource.')
         data = dict(serializer.validated_data.get('data', {}))
         if data_source and INSERT_DATE_COL in (data_source.columns or []):
-            data.setdefault(INSERT_DATE_COL, _dt.datetime.now().strftime('%d/%m/%Y'))
+            data[INSERT_DATE_COL] = _dt.datetime.now().strftime('%d/%m/%Y')
         serializer.save(data=data)
 
     def perform_update(self, serializer):

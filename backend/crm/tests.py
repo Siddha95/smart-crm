@@ -377,6 +377,25 @@ class ColumnOperationTest(TestCase):
         resp = self.client.post(self._url(), {"operation": "add", "name": "telefono"})
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_reorder_columns(self):
+        """Riordinare le colonne aggiorna DataSource.columns nell'ordine richiesto."""
+        resp = self.client.post(self._url(), {"operation": "reorder", "columns": ["email", "nome"]}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.ds.refresh_from_db()
+        self.assertEqual(self.ds.columns, ["email", "nome"])
+
+    def test_reorder_with_wrong_columns_rejected(self):
+        """Reorder con colonne diverse dall'insieme attuale deve essere rifiutato."""
+        resp = self.client.post(self._url(), {"operation": "reorder", "columns": ["nome", "telefono"]}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.ds.refresh_from_db()
+        self.assertEqual(self.ds.columns, ["nome", "email"])  # invariato
+
+    def test_reorder_with_missing_column_rejected(self):
+        """Reorder con una colonna mancante deve essere rifiutato."""
+        resp = self.client.post(self._url(), {"operation": "reorder", "columns": ["nome"]}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
 
 # ── View: RecordViewSet ────────────────────────────────────────────────────────
 
@@ -1044,6 +1063,19 @@ class InsertDateColumnTest(TestCase):
         today = datetime.date.today().strftime('%d/%m/%Y')
         res = self.client.post('/api/records/', {
             'data_source': ds.id, 'data': {'nome': 'Test'}
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['data'][INSERT_DATE_COL], today)
+
+    def test_manual_record_creation_with_empty_insert_date_is_overwritten(self):
+        """Il frontend invia il campo come stringa vuota — deve essere sovrascritto con la data corrente."""
+        ds = DataSource.objects.create(
+            owner=self.user, name='DS3', label='DS3',
+            columns=['nome', INSERT_DATE_COL]
+        )
+        today = datetime.date.today().strftime('%d/%m/%Y')
+        res = self.client.post('/api/records/', {
+            'data_source': ds.id, 'data': {'nome': 'Test', INSERT_DATE_COL: ''}
         }, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(res.data['data'][INSERT_DATE_COL], today)
