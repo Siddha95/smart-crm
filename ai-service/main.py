@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from config import settings
+from ai_config import settings
 from database import engine
 from routers import ai, reports
 

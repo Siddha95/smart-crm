@@ -42,3 +42,8 @@ tqdm==4.67.3
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 uvicorn==0.42.0
+gunicorn==23.0.0
+
+# ai-service dependencies
+sqlalchemy==2.0.41
+pydantic-settings==2.9.1

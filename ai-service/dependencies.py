@@ -4,7 +4,7 @@ import jwt
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
-from config import settings
+from ai_config import settings
 from database import get_db
 from models import UserProfile
 from services.ai.base import AIProvider
