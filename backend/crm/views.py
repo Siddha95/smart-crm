@@ -476,7 +476,23 @@ class AttachmentViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(uploaded_by=self.request.user)
+        from crm.services.image_compress import compress_image, is_image
+        from django.core.files.uploadedfile import InMemoryUploadedFile
+
+        file = self.request.FILES.get('file')
+        if file and is_image(file.content_type):
+            compressed = compress_image(file)
+            new_file = InMemoryUploadedFile(
+                file=compressed,
+                field_name='file',
+                name=file.name.rsplit('.', 1)[0] + '.jpg',
+                content_type='image/jpeg',
+                size=compressed.getbuffer().nbytes,
+                charset=None,
+            )
+            serializer.save(uploaded_by=self.request.user, file=new_file)
+        else:
+            serializer.save(uploaded_by=self.request.user)
 
 
 class NoteViewSet(viewsets.ModelViewSet):

@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import tempfile
@@ -1266,3 +1267,150 @@ class AiToolSoftDeleteTest(TestCase):
         retrieved = Record.objects.get(id=self.record.id)
         self.assertFalse(retrieved.is_active)
         self.assertEqual(retrieved.data['nome'], 'Vittima')
+
+
+# ── Image compression service ─────────────────────────────────────────────────
+
+class ImageCompressServiceTest(TestCase):
+    """Test unitari per crm.services.image_compress."""
+
+    def _make_image(self, width=3000, height=2000, mode='RGB', fmt='PNG') -> io.BytesIO:
+        from PIL import Image as PilImage
+        img = PilImage.new(mode, (width, height), color=(100, 150, 200))
+        buf = io.BytesIO()
+        img.save(buf, format=fmt)
+        buf.seek(0)
+        return buf
+
+    def test_wide_image_is_resized(self):
+        from crm.services.image_compress import compress_image, MAX_WIDTH
+        from PIL import Image as PilImage
+        buf = self._make_image(width=3000, height=2000)
+        result = compress_image(buf)
+        img = PilImage.open(result)
+        self.assertEqual(img.width, MAX_WIDTH)
+
+    def test_aspect_ratio_preserved(self):
+        from crm.services.image_compress import compress_image, MAX_WIDTH
+        from PIL import Image as PilImage
+        buf = self._make_image(width=3000, height=1500)  # ratio 2:1
+        result = compress_image(buf)
+        img = PilImage.open(result)
+        self.assertEqual(img.width, MAX_WIDTH)
+        self.assertEqual(img.height, MAX_WIDTH // 2)
+
+    def test_small_image_not_upscaled(self):
+        from crm.services.image_compress import compress_image, MAX_WIDTH
+        from PIL import Image as PilImage
+        buf = self._make_image(width=800, height=600)
+        result = compress_image(buf)
+        img = PilImage.open(result)
+        self.assertEqual(img.width, 800)
+
+    def test_output_is_jpeg(self):
+        from crm.services.image_compress import compress_image
+        from PIL import Image as PilImage
+        buf = self._make_image()
+        result = compress_image(buf)
+        img = PilImage.open(result)
+        self.assertEqual(img.format, 'JPEG')
+
+    def test_rgba_converted_to_rgb(self):
+        from crm.services.image_compress import compress_image
+        from PIL import Image as PilImage
+        buf = self._make_image(mode='RGBA', fmt='PNG')
+        result = compress_image(buf)
+        img = PilImage.open(result)
+        self.assertEqual(img.mode, 'RGB')
+
+    def test_output_smaller_than_input(self):
+        from crm.services.image_compress import compress_image
+        buf = self._make_image(width=3000, height=2000)
+        original_size = len(buf.getvalue())
+        result = compress_image(buf)
+        compressed_size = result.getbuffer().nbytes
+        self.assertLess(compressed_size, original_size)
+
+    def test_is_image_detects_jpeg(self):
+        from crm.services.image_compress import is_image
+        self.assertTrue(is_image('image/jpeg'))
+
+    def test_is_image_detects_png(self):
+        from crm.services.image_compress import is_image
+        self.assertTrue(is_image('image/png'))
+
+    def test_is_image_rejects_pdf(self):
+        from crm.services.image_compress import is_image
+        self.assertFalse(is_image('application/pdf'))
+
+    def test_is_image_rejects_docx(self):
+        from crm.services.image_compress import is_image
+        self.assertFalse(is_image('application/vnd.openxmlformats-officedocument.wordprocessingml.document'))
+
+
+class AttachmentUploadCompressionTest(TestCase):
+    """Test di integrazione: upload immagine via API → viene compressa."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('attuser', password='pw')
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+        self.ds = DataSource.objects.create(
+            owner=self.user, name='ds', label='DS', columns=['nome']
+        )
+        self.record = Record.objects.create(data_source=self.ds, data={'nome': 'Test'})
+
+    def _make_image_file(self, width=3000, height=2000, name='photo.png'):
+        from PIL import Image as PilImage
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        img = PilImage.new('RGB', (width, height), color=(100, 150, 200))
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return SimpleUploadedFile(name, buf.read(), content_type='image/png')
+
+    def test_image_upload_returns_201(self):
+        f = self._make_image_file()
+        res = self.client.post('/api/attachments/', {
+            'record': self.record.id,
+            'file': f,
+            'file_type': 'photo',
+        }, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+    def test_uploaded_image_is_renamed_to_jpg(self):
+        f = self._make_image_file(name='foto.png')
+        res = self.client.post('/api/attachments/', {
+            'record': self.record.id,
+            'file': f,
+            'file_type': 'photo',
+        }, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(res.data['filename'].endswith('.jpg'))
+
+    def test_pdf_upload_not_compressed(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        pdf = SimpleUploadedFile('doc.pdf', b'%PDF-1.4 fake content', content_type='application/pdf')
+        res = self.client.post('/api/attachments/', {
+            'record': self.record.id,
+            'file': pdf,
+            'file_type': 'pdf',
+        }, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(res.data['filename'].endswith('.pdf'))
+
+    def test_compressed_image_is_smaller(self):
+        from PIL import Image as PilImage
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from crm.models import Attachment
+        f = self._make_image_file(width=3000, height=2000)
+        original_size = len(f.read())
+        f.seek(0)
+        self.client.post('/api/attachments/', {
+            'record': self.record.id,
+            'file': f,
+            'file_type': 'photo',
+        }, format='multipart')
+        att = Attachment.objects.filter(record=self.record).first()
+        self.assertIsNotNone(att)
+        self.assertLess(att.file.size, original_size)
