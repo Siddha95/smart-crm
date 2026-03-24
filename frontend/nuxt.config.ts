@@ -20,6 +20,8 @@ export default defineNuxtConfig({
     '/': { redirect: '/login' },
   },
 
+  ssr: false,
+
   compatibilityDate: '2025-01-15',
 
   eslint: {
