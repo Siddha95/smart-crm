@@ -1,0 +1,13 @@
+services:
+  backend:
+    build: ./backend
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - media_data:/data/media
+    env_file:
+      - .env
+
+volumes:
+  media_data:
