@@ -5,10 +5,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - media_data:/data/media
+      - /opt/smart-crm/media:/data/media
       - ./ai-service:/ai-service
     env_file:
       - .env
 
-volumes:
-  media_data:
