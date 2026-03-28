@@ -14,16 +14,13 @@ watch(
 );
 
 const preview = ref(false);
-
-// Debounce autosave: salva 800ms dopo l'ultima modifica
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
+const saved = ref(false);
 
 function onTitleInput(val: string) {
   if (!notesStore.activeId) return;
   const note = notesStore.active;
   if (!note) return;
   note.title = val;
-  scheduleSave({ title: val });
 }
 
 function onContentInput(val: string) {
@@ -31,14 +28,16 @@ function onContentInput(val: string) {
   const note = notesStore.active;
   if (!note) return;
   note.content = val;
-  scheduleSave({ content: val });
 }
 
-function scheduleSave(patch: { title?: string; content?: string }) {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    if (notesStore.activeId) notesStore.save(notesStore.activeId, patch);
-  }, 800);
+async function saveNote() {
+  if (!notesStore.activeId || !notesStore.active) return;
+  await notesStore.save(notesStore.activeId, {
+    title: notesStore.active.title,
+    content: notesStore.active.content,
+  });
+  saved.value = true;
+  setTimeout(() => (saved.value = false), 2000);
 }
 
 const renderedContent = computed(() => {
@@ -142,12 +141,6 @@ async function deleteNote() {
                   @click="deleteNote"
                 />
               </UTooltip>
-              <UBadge
-                v-if="notesStore.saving"
-                label="Salvataggio..."
-                variant="soft"
-                size="xs"
-              />
             </div>
           </div>
 
@@ -167,6 +160,19 @@ async function deleteNote() {
               class="prose prose-sm dark:prose-invert max-w-none"
               v-html="renderedContent"
             />
+          </div>
+
+          <!-- Pulsante salva -->
+          <div class="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+            <UButton
+              :icon="saved ? 'lucide:check' : 'lucide:save'"
+              :color="saved ? 'success' : 'primary'"
+              :loading="notesStore.saving"
+              block
+              @click="saveNote"
+            >
+              {{ saved ? 'Salvato' : 'Salva' }}
+            </UButton>
           </div>
         </div>
 
