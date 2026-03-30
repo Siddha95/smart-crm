@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from crm.models import Attachment, DataSource, Note, Record, RecordComment, RecordHistory, StageTemplate, UserProfile
+from crm.models import Attachment, DataSource, MapPin, Note, Record, RecordComment, RecordHistory, StageTemplate, UserProfile
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -72,6 +72,32 @@ class NoteSerializer(serializers.ModelSerializer):
         model = Note
         fields = ['id', 'title', 'content', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
+
+
+class MapPinSerializer(serializers.ModelSerializer):
+    record_data = serializers.SerializerMethodField()
+    datasource_label = serializers.SerializerMethodField()
+    columns = serializers.SerializerMethodField()
+
+    def get_record_data(self, obj):
+        return obj.record.data
+
+    def get_datasource_label(self, obj):
+        return obj.record.data_source.label
+
+    def get_columns(self, obj):
+        return obj.record.data_source.columns
+
+    def validate_record(self, record):
+        request = self.context.get('request')
+        if record.data_source.owner != request.user:
+            raise serializers.ValidationError('Record non trovato.')
+        return record
+
+    class Meta:
+        model = MapPin
+        fields = ['id', 'record', 'lat', 'lng', 'color', 'created_at', 'record_data', 'datasource_label', 'columns']
+        read_only_fields = ['created_at']
 
 
 class RecordSerializer(serializers.ModelSerializer):

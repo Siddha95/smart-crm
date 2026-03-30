@@ -16,6 +16,8 @@
     "@nuxt/ui": "^4.5.1",
     "@pinia-plugin-persistedstate/nuxt": "^1.2.1",
     "@pinia/nuxt": "^0.11.3",
+    "@types/leaflet": "^1.9.21",
+    "leaflet": "^1.9.4",
     "marked": "^17.0.5",
     "nuxt": "^4.4.2",
     "pinia": "^3.0.4",

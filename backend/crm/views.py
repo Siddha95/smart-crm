@@ -10,10 +10,11 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from crm.models import Attachment, DataSource, Note, Record, RecordComment, RecordHistory, StageTemplate, UserProfile
+from crm.models import Attachment, DataSource, MapPin, Note, Record, RecordComment, RecordHistory, StageTemplate, UserProfile
 from crm.serializers import (
     AttachmentSerializer,
     DataSourceSerializer,
+    MapPinSerializer,
     NoteSerializer,
     RecordCommentSerializer,
     RecordHistorySerializer,
@@ -513,3 +514,15 @@ class StageTemplateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+
+class MapPinViewSet(viewsets.ModelViewSet):
+    serializer_class = MapPinSerializer
+    http_method_names = ['get', 'post', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        return (
+            MapPin.objects
+            .filter(record__data_source__owner=self.request.user)
+            .select_related('record__data_source')
+        )

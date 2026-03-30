@@ -28,6 +28,7 @@ function logout() {
       </template>
 
       <template #right>
+        <UButton icon="lucide:map" variant="ghost" to="/map">Mappa</UButton>
         <UButton icon="lucide:upload" variant="ghost" to="/import">Importa</UButton>
         <UButton icon="lucide:notebook-pen" variant="ghost" @click="notesStore.open = true">
           Note

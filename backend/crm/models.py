@@ -121,6 +121,21 @@ class StageTemplate(models.Model):
     return self.name
 
 
+class MapPin(models.Model):
+  '''Pin geografico collegato a un Record'''
+  record = models.ForeignKey(Record, on_delete=models.CASCADE, related_name='map_pins')
+  lat = models.FloatField()
+  lng = models.FloatField()
+  color = models.CharField(max_length=7, default='#22c55e')
+  created_at = models.DateTimeField(auto_now_add=True)
+
+  class Meta:
+    ordering = ['created_at']
+
+  def __str__(self):
+    return f"Pin for Record {self.record_id} ({self.lat}, {self.lng})"
+
+
 class Note(models.Model):
   '''Nota personale dell\'utente (taccuino)'''
   owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notes')
