@@ -10,18 +10,49 @@ const emit = defineEmits<{
   openEdit: [record: any]
 }>()
 
-// ── Copia locale mutabile dei gruppi ─────────────────────────────────────────
-const groups = ref<Map<string, any[]>>(new Map())
+// ── Card ──────────────────────────────────────────────────────────────────────
+const CARD_COLS = 3
+const previewCols = computed(() => props.columns.slice(0, CARD_COLS))
 
-watch(() => props.records, (records) => {
+function cardTitle(record: any) {
+  for (const col of props.columns) {
+    const val = record.data[col]
+    if (val !== null && val !== undefined && val !== '') return String(val)
+  }
+  return `#${record.id}`
+}
+
+// ── Sort per stage ────────────────────────────────────────────────────────────
+const stageSort = ref<Map<string, 'asc' | 'desc'>>(new Map())
+
+function toggleStageSort(stage: string) {
+  const current = stageSort.value.get(stage)
+  const next = new Map(stageSort.value)
+  if (!current) next.set(stage, 'asc')
+  else if (current === 'asc') next.set(stage, 'desc')
+  else next.delete(stage)
+  stageSort.value = next
+}
+
+// ── Gruppi per stage ─────────────────────────────────────────────────────────
+const groups = computed<Map<string, any[]>>(() => {
   const map = new Map<string, any[]>([['', []]])
   for (const s of props.stages) map.set(s, [])
-  for (const r of records) {
+  for (const r of props.records) {
     const key = r.stage && props.stages.includes(r.stage) ? r.stage : ''
     map.get(key)!.push(r)
   }
-  groups.value = map
-}, { immediate: true })
+  // Applica sort per ogni stage che ha un ordinamento attivo
+  for (const [stage, dir] of stageSort.value) {
+    const recs = map.get(stage)
+    if (recs) map.set(stage, [...recs].sort((a, b) => {
+      const ta = cardTitle(a).toLowerCase()
+      const tb = cardTitle(b).toLowerCase()
+      return dir === 'asc' ? ta.localeCompare(tb) : tb.localeCompare(ta)
+    }))
+  }
+  return map
+})
 
 // ── Drag & drop ───────────────────────────────────────────────────────────────
 const draggingId = ref<number | null>(null)
@@ -92,17 +123,6 @@ function onDragEnd() {
   dragOverIndex.value = null
 }
 
-// ── Card ──────────────────────────────────────────────────────────────────────
-const CARD_COLS = 3
-const previewCols = computed(() => props.columns.slice(0, CARD_COLS))
-
-function cardTitle(record: any) {
-  for (const col of props.columns) {
-    const val = record.data[col]
-    if (val !== null && val !== undefined && val !== '') return String(val)
-  }
-  return `#${record.id}`
-}
 </script>
 
 <template>
@@ -113,13 +133,19 @@ function cardTitle(record: any) {
       class="flex-shrink-0 w-72 flex flex-col gap-2"
     >
       <!-- Header colonna -->
-      <div
-        class="flex items-center justify-between px-3 py-2 rounded-lg font-medium text-sm"
+      <button
+        class="flex items-center justify-between px-3 py-2 rounded-lg font-medium text-sm w-full select-none hover:opacity-80 transition-opacity"
         :class="stage ? 'bg-primary/10 text-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'"
+        @click="toggleStageSort(stage)"
       >
-        <span>{{ stage || 'Senza stage' }}</span>
+        <span class="flex items-center gap-1">
+          {{ stage || 'Senza stage' }}
+          <span v-if="stageSort.get(stage)" class="text-xs">
+            {{ stageSort.get(stage) === 'asc' ? '↑' : '↓' }}
+          </span>
+        </span>
         <UBadge :label="String(groups.get(stage)?.length ?? 0)" variant="soft" size="xs" />
-      </div>
+      </button>
 
       <!-- Drop zone colonna -->
       <div class="flex flex-col min-h-24 rounded-lg p-1 transition-colors">
