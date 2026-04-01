@@ -1,20 +1,27 @@
 <script setup lang="ts">
+interface KanbanRecord {
+  id: number
+  stage: string
+  is_favorite: boolean
+  data: Record<string, unknown>
+}
+
 const props = defineProps<{
-  records: any[]
+  records: KanbanRecord[]
   stages: string[]
   columns: string[]
 }>()
 
 const emit = defineEmits<{
   dropped: [recordId: number, newStage: string, orderedIds: number[]]
-  openEdit: [record: any]
+  openEdit: [record: KanbanRecord]
 }>()
 
 // ── Card ──────────────────────────────────────────────────────────────────────
 const CARD_COLS = 3
 const previewCols = computed(() => props.columns.slice(0, CARD_COLS))
 
-function cardTitle(record: any) {
+function cardTitle(record: KanbanRecord): string {
   for (const col of props.columns) {
     const val = record.data[col]
     if (val !== null && val !== undefined && val !== '') return String(val)
@@ -34,32 +41,39 @@ function toggleStageSort(stage: string) {
   stageSort.value = next
 }
 
-// ── Gruppi per stage ─────────────────────────────────────────────────────────
-const groups = computed<Map<string, any[]>>(() => {
-  const map = new Map<string, any[]>([['', []]])
+// ── Gruppi per stage (ref mutabile per drag & drop) ───────────────────────────
+const groups = ref<Map<string, KanbanRecord[]>>(new Map())
+
+function buildGroups(): Map<string, KanbanRecord[]> {
+  const map = new Map<string, KanbanRecord[]>([['', []]])
   for (const s of props.stages) map.set(s, [])
   for (const r of props.records) {
     const key = r.stage && props.stages.includes(r.stage) ? r.stage : ''
     map.get(key)!.push(r)
   }
-  // Applica sort per ogni stage che ha un ordinamento attivo
   for (const [stage, dir] of stageSort.value) {
     const recs = map.get(stage)
-    if (recs) map.set(stage, [...recs].sort((a, b) => {
-      const ta = cardTitle(a).toLowerCase()
-      const tb = cardTitle(b).toLowerCase()
-      return dir === 'asc' ? ta.localeCompare(tb) : tb.localeCompare(ta)
-    }))
+    if (recs) {
+      map.set(stage, [...recs].sort((a, b) => {
+        const ta = cardTitle(a).toLowerCase()
+        const tb = cardTitle(b).toLowerCase()
+        return dir === 'asc' ? ta.localeCompare(tb) : tb.localeCompare(ta)
+      }))
+    }
   }
   return map
-})
+}
+
+watch([() => props.records, stageSort], () => {
+  groups.value = buildGroups()
+}, { immediate: true, deep: true })
 
 // ── Drag & drop ───────────────────────────────────────────────────────────────
 const draggingId = ref<number | null>(null)
 const dragOverStage = ref<string | null>(null)
 const dragOverIndex = ref<number | null>(null)
 
-function onDragStart(e: DragEvent, record: any) {
+function onDragStart(e: DragEvent, record: KanbanRecord) {
   draggingId.value = record.id
   e.dataTransfer!.effectAllowed = 'move'
 }
@@ -75,22 +89,26 @@ function onDragOver(e: DragEvent, stage: string, index: number) {
 function onDrop(stage: string, dropIndex: number) {
   if (draggingId.value === null) return
 
-  // Trova il record e lo stage di origine
   let sourceStage = ''
   let sourceIndex = -1
   for (const [s, recs] of groups.value) {
     const idx = recs.findIndex(r => r.id === draggingId.value)
-    if (idx !== -1) { sourceStage = s; sourceIndex = idx; break }
+    if (idx !== -1) {
+      sourceStage = s
+      sourceIndex = idx
+      break
+    }
   }
-  if (sourceIndex === -1) { draggingId.value = null; return }
+  if (sourceIndex === -1) {
+    draggingId.value = null
+    return
+  }
 
-  // Rimuovi dalla sorgente
   const sourceGroup = [...groups.value.get(sourceStage)!]
   const [record] = sourceGroup.splice(sourceIndex, 1)
   record.stage = stage
 
-  // Inserisci nella destinazione
-  let targetGroup: any[]
+  let targetGroup: KanbanRecord[]
   if (sourceStage === stage) {
     targetGroup = sourceGroup
     const adj = dropIndex > sourceIndex ? dropIndex - 1 : dropIndex
@@ -105,7 +123,6 @@ function onDrop(stage: string, dropIndex: number) {
   newGroups.set(stage, targetGroup)
   groups.value = newGroups
 
-  // Emetti la lista ordinata piatta di tutti gli id
   const orderedIds: number[] = []
   for (const recs of newGroups.values()) {
     for (const r of recs) orderedIds.push(r.id)
@@ -122,7 +139,6 @@ function onDragEnd() {
   dragOverStage.value = null
   dragOverIndex.value = null
 }
-
 </script>
 
 <template>
@@ -130,9 +146,9 @@ function onDragEnd() {
     <div
       v-for="stage in ['', ...stages]"
       :key="stage"
-      class="flex-shrink-0 w-72 flex flex-col gap-2"
+      class="shrink-0 w-72 flex flex-col gap-2"
     >
-      <!-- Header colonna -->
+      <!-- Header colonna cliccabile -->
       <button
         class="flex items-center justify-between px-3 py-2 rounded-lg font-medium text-sm w-full select-none hover:opacity-80 transition-opacity"
         :class="stage ? 'bg-primary/10 text-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'"
@@ -144,14 +160,20 @@ function onDragEnd() {
             {{ stageSort.get(stage) === 'asc' ? '↑' : '↓' }}
           </span>
         </span>
-        <UBadge :label="String(groups.get(stage)?.length ?? 0)" variant="soft" size="xs" />
+        <UBadge
+          :label="String(groups.get(stage)?.length ?? 0)"
+          variant="soft"
+          size="xs"
+        />
       </button>
 
       <!-- Drop zone colonna -->
       <div class="flex flex-col min-h-24 rounded-lg p-1 transition-colors">
-
-        <template v-for="(record, idx) in (groups.get(stage) ?? [])" :key="record.id">
-          <!-- Linea di inserimento SOPRA questa card -->
+        <template
+          v-for="(record, idx) in (groups.get(stage) ?? [])"
+          :key="record.id"
+        >
+          <!-- Linea di inserimento -->
           <div
             v-if="dragOverStage === stage && dragOverIndex === idx"
             class="h-1 rounded-full bg-primary mx-1 my-0.5 transition-all"
@@ -189,7 +211,7 @@ function onDragEnd() {
           </div>
         </template>
 
-        <!-- Drop zone fondo colonna (append) -->
+        <!-- Drop zone fondo colonna -->
         <div
           class="flex-1 min-h-12 rounded-lg transition-colors"
           :class="[
