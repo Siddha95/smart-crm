@@ -540,6 +540,13 @@ function onMoved() {
   loadRecords();
 }
 
+// ─── Commenti da riga ──────────────────────────────────────────────────────
+const commentsRecord = ref<any>(null);
+const commentsOpen = computed({
+  get: () => !!commentsRecord.value,
+  set: (v) => { if (!v) commentsRecord.value = null; },
+});
+
 // ─── Delete da riga ────────────────────────────────────────────────────────
 const pendingDelete = ref<any>(null);
 const deleteLoading = ref(false);
@@ -1051,6 +1058,11 @@ await loadRecords();
                       icon: row._favorite ? 'lucide:star-off' : 'lucide:star',
                       onSelect: () => toggleFavorite(getRecord(row._id)),
                     },
+                    {
+                      label: 'Commenti',
+                      icon: 'lucide:message-square',
+                      onSelect: () => (commentsRecord = getRecord(row._id)),
+                    },
                   ],
                   [
                     {
@@ -1085,6 +1097,22 @@ await loadRecords();
         :items-per-page="PAGE_SIZE"
       />
     </div>
+
+    <!-- Slideover commenti -->
+    <USlideover
+      v-model:open="commentsOpen"
+      title="Commenti"
+      side="right"
+    >
+      <template #body>
+        <div class="p-4">
+          <RecordComments
+            v-if="commentsRecord"
+            :record-id="commentsRecord.id"
+          />
+        </div>
+      </template>
+    </USlideover>
 
     <!-- Modal eliminazione -->
     <UModal v-model:open="deleteModalOpen">
