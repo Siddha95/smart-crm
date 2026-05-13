@@ -344,7 +344,14 @@ class RecordViewSet(viewsets.ModelViewSet):
             desc = ordering.startswith('-')
             col = ordering.lstrip('-')
             if _SAFE_COL_RE.match(col):
-                order_expr = RawSQL("data->>%s", [col])
+                # Converte date europee (D/M/YYYY o DD/MM/YYYY) a YYYY-MM-DD per ordinamento corretto.
+                # ISO YYYY-MM-DD ordina già correttamente come testo, lasciato invariato.
+                order_expr = RawSQL(
+                    "CASE WHEN data->>%s ~ '^\\d{1,2}/\\d{1,2}/\\d{4}$' "
+                    "THEN to_char(to_date(data->>%s, 'DD/MM/YYYY'), 'YYYY-MM-DD') "
+                    "ELSE data->>%s END",
+                    [col, col, col],
+                )
                 queryset = queryset.order_by(order_expr.desc() if desc else order_expr)
         else:
             queryset = queryset.order_by('-is_favorite', 'id')
